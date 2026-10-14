@@ -1,0 +1,16 @@
+services:
+  losev-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: losev_backend_assessment
+    ports:
+      - "5000:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__DefaultConnection=Data Source=/app/data/losev_assessment.db
+    volumes:
+      # Candidate should ensure the SQLite directory exists or is mapped correctly
+      - ./data:/app/data
+    restart: unless-stopped
