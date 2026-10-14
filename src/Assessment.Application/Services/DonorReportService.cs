@@ -34,58 +34,45 @@ public class DonorReportService : IDonorReportService
     {
         _logger.LogInformation("Generating donor summary report...");
 
-        // CRITICAL BUG / ANTI-PATTERN [Task 2]:
-        // 1. Pulls all Donors and all related Donations into EF tracking memory!
-        // 2. Early ToListAsync loads full entity graphs into memory.
-        var allDonors = await _unitOfWork.Donors.Query()
-            .Include(d => d.Donations)
-            .ToListAsync(cancellationToken);
+        var query = _unitOfWork.Donors.Query().AsNoTracking();
 
-        var reportList = new List<DonorReportSummaryDto>();
-
-        // 3. Loops through each donor in-memory
-        foreach (var donor in allDonors)
+        var report = query.Select(d => new DonorReportSummaryDto
         {
-            // 4. In-memory filtering instead of pushing query to SQLite / DB
-            var approvedDonations = donor.Donations
-                .Where(d => d.Status == DonationStatus.Approved)
-                .ToList();
+            DonorId = d.Id,
+            DonorName = (d.FirstName + " " + d.LastName).Trim(),
+            Email = d.Email,
+            TotalDonationsCount = d.Donations.Count(x => x.Status == DonationStatus.Approved),
+            TotalDonatedAmount = d.Donations
+                .Where(x => x.Status == DonationStatus.Approved)
+                .Sum(x => (decimal?)x.Amount) ?? 0m,
+            LastDonationDate = d.Donations.Max(x => (DateTime?)x.DonationDate),
+            Status = d.IsActive ? "Active" : "Inactive"
+        });
 
-            var totalAmount = approvedDonations.Sum(d => d.Amount);
-            var count = approvedDonations.Count;
-
-            // In-memory filter criteria check
-            if (minTotalAmount.HasValue && totalAmount < minTotalAmount.Value)
-            {
-                continue;
-            }
-
-            if (minDonationsCount.HasValue && count < minDonationsCount.Value)
-            {
-                continue;
-            }
-
-            // 5. N+1 Query: Querying DB for each donor inside the loop to get last donation date!
-            var lastDonation = await _unitOfWork.Donations.Query()
-                .Where(d => d.DonorId == donor.Id)
-                .OrderByDescending(d => d.DonationDate)
-                .FirstOrDefaultAsync(cancellationToken);
-
-            var avgAmount = count > 0 ? totalAmount / count : 0m;
-
-            reportList.Add(new DonorReportSummaryDto
-            {
-                DonorId = donor.Id,
-                DonorName = $"{donor.FirstName} {donor.LastName}".Trim(),
-                Email = donor.Email,
-                TotalDonationsCount = count,
-                TotalDonatedAmount = totalAmount,
-                AverageDonationAmount = Math.Round(avgAmount, 2),
-                LastDonationDate = lastDonation?.DonationDate,
-                Status = donor.IsActive ? "Active" : "Inactive"
-            });
+        // 3) Filtreler: dolu geldiyse uygulanır
+        if (minTotalAmount.HasValue)
+        {
+            report = report.Where(r => r.TotalDonatedAmount >= minTotalAmount.Value);
         }
 
-        return reportList;
+        if (minDonationsCount.HasValue)
+        {
+            report = report.Where(r => r.TotalDonationsCount >= minDonationsCount.Value);
+        }
+
+        // 4) Tek sorgu ile çek
+        var rows = await report
+            .OrderBy(r => r.DonorId)
+            .ToListAsync(cancellationToken);
+
+        // 5) Ortalama bellekte, sadece sonuç satırları üzerinde
+        foreach (var row in rows)
+        {
+            row.AverageDonationAmount = row.TotalDonationsCount > 0
+                ? Math.Round(row.TotalDonatedAmount / row.TotalDonationsCount, 2)
+                : 0m;
+        }
+
+        return rows;
     }
 }
