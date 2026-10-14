@@ -110,4 +110,27 @@ public class DonationsController : ControllerBase
         var affectedRows = await _donationService.BulkUpdateStatusAsync(dto, cancellationToken);
         return Ok(new { affectedRows, message = $"Bulk update finished successfully. {affectedRows} donations updated." });
     }
+
+    [HttpPost("legacy-process")]
+    [Authorize]
+    [Consumes("application/json")]
+    [ProducesResponseType(typeof(ApiResponse<DonationDto>), StatusCodes.Status201Created)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> LegacyProcessDonation(
+        [FromBody] CreateDonationDto dto,
+        CancellationToken cancellationToken)
+    {
+
+        var currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        var created = await _donationService.CreateDonationAsync(dto, currentUserId, cancellationToken);
+
+        var response = ApiResponse<DonationDto>.SuccessResult(created, "Donation created successfully.");
+
+        return CreatedAtAction(
+            nameof(GetById),
+            new { id = created.Id, version = "2.0" },
+            response);
+    }
 }

@@ -105,38 +105,51 @@ public class DonationService : IDonationService
         {
             throw new BusinessException($"Cannot create donation for inactive donor {dto.DonorId}.", "INACTIVE_DONOR");
         }
+        await _unitOfWork.BeginTransactionAsync(cancellationToken);
 
-        // Operation 1: Create Donation
-        var donation = _mapper.Map<Donation>(dto);
-        donation.Status = DonationStatus.Pending;
-        donation.CreatedAt = DateTime.UtcNow;
-
-        await _unitOfWork.Donations.AddAsync(donation, cancellationToken);
-        // PROBLEM [Task 5]: First SaveChanges commits donation without transaction!
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        // Operation 2: Update Donor Total Donated Amount
-        donor.TotalDonatedAmount += donation.Amount;
-        donor.UpdatedAt = DateTime.UtcNow;
-        await _unitOfWork.Donors.UpdateAsync(donor, cancellationToken);
-        // PROBLEM [Task 5]: Second SaveChanges committed independently!
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        // Operation 3: Audit Log
-        var audit = new AuditLog
+        try
         {
-            EntityName = nameof(Donation),
-            Action = "Create",
-            Timestamp = DateTime.UtcNow,
-            Details = $"Donation created with amount {donation.Amount} for Donor {donor.Id}",
-            UserId = currentUserId
-        };
-        await _unitOfWork.Repository<AuditLog>().AddAsync(audit, cancellationToken);
-        // PROBLEM [Task 5]: Third SaveChanges committed independently!
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Successfully created donation {DonationId}", donation.Id);
-        return _mapper.Map<DonationDto>(donation);
+
+            // Operation 1: Create Donation
+            var donation = _mapper.Map<Donation>(dto);
+            donation.Status = DonationStatus.Pending;
+            donation.CreatedAt = DateTime.UtcNow;
+
+            await _unitOfWork.Donations.AddAsync(donation, cancellationToken);
+            // PROBLEM [Task 5]: First SaveChanges commits donation without transaction!
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            // Operation 2: Update Donor Total Donated Amount
+            donor.TotalDonatedAmount += donation.Amount;
+            donor.UpdatedAt = DateTime.UtcNow;
+            await _unitOfWork.Donors.UpdateAsync(donor, cancellationToken);
+            // PROBLEM [Task 5]: Second SaveChanges committed independently!
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            // Operation 3: Audit Log
+            var audit = new AuditLog
+            {
+                EntityName = nameof(Donation),
+                Action = "Create",
+                Timestamp = DateTime.UtcNow,
+                Details = $"Donation created with amount {donation.Amount} for Donor {donor.Id}",
+                UserId = currentUserId
+            };
+            await _unitOfWork.Repository<AuditLog>().AddAsync(audit, cancellationToken);
+            // PROBLEM [Task 5]: Third SaveChanges committed independently!
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _unitOfWork.CommitTransactionAsync(cancellationToken); // son SaveChanges + commit
+
+            _logger.LogInformation("Successfully created donation {DonationId}", donation.Id);
+            return _mapper.Map<DonationDto>(donation);
+        }
+        catch (System.Exception)
+        {
+            await _unitOfWork.RollbackTransactionAsync(cancellationToken);
+
+            throw;
+        }
     }
 
     /// <summary>
