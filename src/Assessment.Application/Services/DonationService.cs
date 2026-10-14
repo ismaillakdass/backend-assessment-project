@@ -213,25 +213,13 @@ public class DonationService : IDonationService
     {
         _logger.LogInformation("Starting bulk update from {CurrentStatus} to {NewStatus}", dto.CurrentStatus, dto.NewStatus);
 
-        // ANTI-PATTERN [Task 4]:
-        // Pulls all matching donations into change tracker memory
-        var donations = await _unitOfWork.Donations.Query()
-            .Where(d => d.Status == dto.CurrentStatus)
-            .ToListAsync(cancellationToken);
+        var affectedRows = await _unitOfWork.Donations.BulkUpdateStatusAsync(
+            dto.CurrentStatus,
+            dto.NewStatus,
+            cancellationToken);
 
-        // Inefficient foreach loop modifying entities in memory
-        foreach (var donation in donations)
-        {
-            donation.Status = dto.NewStatus;
-            donation.UpdatedAt = DateTime.UtcNow;
-            await _unitOfWork.Donations.UpdateAsync(donation, cancellationToken);
-        }
-
-        // Saves potentially hundreds of rows individually
-        var count = await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Bulk update finished. Affected rows: {Count}", count);
-        return count;
+        _logger.LogInformation("Bulk update finished. Affected rows: {Count}", affectedRows);
+        return affectedRows;
     }
 
     public async Task<int> CancelPendingDonationsOlderThanDaysAsync(int days, CancellationToken cancellationToken = default)

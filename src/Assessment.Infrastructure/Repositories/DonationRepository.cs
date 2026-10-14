@@ -46,12 +46,13 @@ public class DonationRepository : Repository<Donation>, IDonationRepository
         CancellationToken cancellationToken = default)
     {
         // Default inefficient approach loading into memory:
-        var donations = await _dbSet.Where(d => d.Status == currentStatus).ToListAsync(cancellationToken);
-        foreach (var donation in donations)
-        {
-            donation.Status = newStatus;
-            donation.UpdatedAt = DateTime.UtcNow;
-        }
-        return await _context.SaveChangesAsync(cancellationToken);
+        var now = DateTime.UtcNow;
+
+        return await _dbSet
+            .Where(d => d.Status == currentStatus)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(d => d.Status, newStatus)
+                .SetProperty(d => d.UpdatedAt, now),
+                cancellationToken);
     }
 }
